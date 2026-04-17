@@ -20,7 +20,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-wisp';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 3001;
 
   app.use(cors());
   app.use(express.json());
@@ -42,6 +42,17 @@ async function startServer() {
     }
   };
 
+  const getSettingValue = (key: string, defaultValue: string) => {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as any;
+    return row?.value ?? defaultValue;
+  };
+
+  const getGracePeriodDays = () => {
+    const value = getSettingValue('grace_period', '7');
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? 7 : parsed;
+  };
+
   // --- API ENDPOINTS ---
 
   // Auth
@@ -55,6 +66,51 @@ async function startServer() {
     
     const token = jwt.sign({ id: user.id, role_id: user.role_id }, JWT_SECRET, { expiresIn: '1d' });
     res.json({ token, user: { id: user.id, username: user.username, full_name: user.full_name } });
+  });
+
+  app.get('/api/admin/settings', authenticate, (req, res) => {
+    const user = db.prepare('SELECT id, username, full_name FROM users WHERE id = ?').get(req.user.id) as any;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json({
+      username: user.username,
+      full_name: user.full_name,
+      grace_period: getGracePeriodDays()
+    });
+  });
+
+  app.put('/api/admin/settings', authenticate, async (req, res) => {
+    const { username, full_name, password, grace_period } = req.body;
+    try {
+      if (!username || !full_name) {
+        return res.status(400).json({ error: 'Username and full name are required.' });
+      }
+
+      const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id) as any;
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      const hashedPassword = password ? bcrypt.hashSync(password, 10) : user.password;
+
+      const graceDays = parseInt(grace_period, 10);
+      if (Number.isNaN(graceDays) || graceDays < 0) {
+        return res.status(400).json({ error: 'Grace period must be a non-negative number.' });
+      }
+
+      db.prepare('UPDATE users SET username = ?, full_name = ?, password = ? WHERE id = ?')
+        .run(username, full_name, hashedPassword, req.user.id);
+
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('grace_period', graceDays.toString());
+
+      db.prepare('INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)').run(
+        req.user.id,
+        'Admin Settings Updated',
+        `Updated admin settings and grace period to ${graceDays} days.`
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Failed to update settings' });
+    }
   });
 
   // Dashboard Stats
@@ -113,9 +169,10 @@ async function startServer() {
   // Subscribers CRUD
   app.get('/api/subscribers', authenticate, (req, res) => {
     const subscribers = db.prepare(`
-      SELECT s.*, p.name as plan_name 
-      FROM subscribers s 
+      SELECT s.*, p.name as plan_name, r.name as router_name
+      FROM subscribers s
       LEFT JOIN plans p ON s.plan_id = p.id
+      LEFT JOIN mikrotik_routers r ON s.router_id = r.id
     `).all();
     res.json(subscribers);
   });
@@ -124,15 +181,16 @@ async function startServer() {
     const sub = req.body;
     try {
       const local_address = sub.local_address || '192.168.5.1';
+      const billing_date = sub.billing_date || null;
       
       // Auto-create PPP secret in MikroTik FIRST
       // If this fails, the DB insert won't happen, preventing orphaned records
       await addSubscriberToMikrotik({ ...sub, local_address });
 
       const result = db.prepare(`
-        INSERT INTO subscribers (full_name, address, contact_number, username, password, plan_id, remote_address, local_address, router_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(sub.full_name, sub.address, sub.contact_number, sub.username, sub.password, sub.plan_id, sub.remote_address, local_address, sub.router_id);
+        INSERT INTO subscribers (full_name, address, contact_number, username, password, plan_id, remote_address, local_address, router_id, billing_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(sub.full_name, sub.address, sub.contact_number, sub.username, sub.password, sub.plan_id, sub.remote_address, local_address, sub.router_id, billing_date);
       
       const newSub = { id: result.lastInsertRowid, ...sub, local_address };
       
@@ -149,13 +207,14 @@ async function startServer() {
   });
 
   app.put('/api/subscribers/:id', authenticate, async (req, res) => {
-    const { full_name, address, contact_number, username, password, plan_id, remote_address, router_id } = req.body;
+    const { full_name, address, contact_number, username, password, plan_id, remote_address, router_id, billing_date } = req.body;
     try {
       const subscriber = db.prepare('SELECT * FROM subscribers WHERE id = ?').get(req.params.id) as any;
       if (!subscriber) return res.status(404).json({ error: 'Subscriber not found' });
 
       // If password is provided, update it; otherwise keep the existing one
       const finalPassword = password || subscriber.password;
+      const finalBillingDate = billing_date || null;
 
       // Sync with MikroTik before updating database
       const { updateSubscriberOnMikrotik } = await import('./server/mikrotik.js');
@@ -172,9 +231,9 @@ async function startServer() {
 
       db.prepare(`
         UPDATE subscribers
-        SET full_name = ?, address = ?, contact_number = ?, username = ?, password = ?, plan_id = ?, remote_address = ?, router_id = ?
+        SET full_name = ?, address = ?, contact_number = ?, username = ?, password = ?, plan_id = ?, remote_address = ?, router_id = ?, billing_date = ?
         WHERE id = ?
-      `).run(full_name, address, contact_number, username, finalPassword, plan_id, remote_address, router_id, req.params.id);
+      `).run(full_name, address, contact_number, username, finalPassword, plan_id, remote_address, router_id, finalBillingDate, req.params.id);
 
       db.prepare('INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)').run(
         req.user.id,
@@ -256,39 +315,42 @@ async function startServer() {
 
   app.post('/api/invoices/generate', authenticate, (req, res) => {
     try {
-      // Get all active subscribers with their plan prices
-      const subscribers = db.prepare(`
-        SELECT s.id, p.price 
+      // Generate invoices for subscribers whose billing date has passed
+      // and don't have unpaid invoices (same logic as automatic generation)
+      const subscribersToBill = db.prepare(`
+        SELECT s.id, s.full_name, s.billing_date, p.price, p.billing_cycle
         FROM subscribers s
         JOIN plans p ON s.plan_id = p.id
-        WHERE s.status = 'ACTIVE' OR s.status = 'SUSPENDED'
+        WHERE s.billing_date IS NOT NULL
+          AND s.status IN ('ACTIVE', 'SUSPENDED')
+          AND datetime(s.billing_date, '+' || p.billing_cycle || ' days') <= datetime('now')
+          AND NOT EXISTS (
+            SELECT 1 FROM invoices i
+            WHERE i.subscriber_id = s.id AND i.status = 'UNPAID'
+          )
       `).all() as any[];
 
       let generatedCount = 0;
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + 7); // Due in 7 days
+
+      for (const sub of subscribersToBill) {
+        const gracePeriod = getGracePeriodDays();
+      const billingDate = new Date(sub.billing_date);
+      const dueDate = new Date(billingDate);
+      dueDate.setDate(dueDate.getDate() + sub.billing_cycle + gracePeriod); // billing_cycle + grace period
       const dueDateStr = dueDate.toISOString();
 
-      for (const sub of subscribers) {
-        // Check if an unpaid invoice already exists for this user
-        const existing = db.prepare(`
-          SELECT id FROM invoices 
-          WHERE subscriber_id = ? AND status = 'UNPAID'
-        `).get(sub.id);
-
-        if (!existing && sub.price > 0) {
-          db.prepare(`
-            INSERT INTO invoices (subscriber_id, amount, due_date)
-            VALUES (?, ?, ?)
-          `).run(sub.id, sub.price, dueDateStr);
-          generatedCount++;
-        }
+        // Generate invoice
+        db.prepare(`
+          INSERT INTO invoices (subscriber_id, amount, due_date)
+          VALUES (?, ?, ?)
+        `).run(sub.id, sub.price, dueDateStr);
+        generatedCount++;
       }
 
       db.prepare('INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)').run(
         req.user.id,
-        'Batch Invoices Generated',
-        `Generated ${generatedCount} new invoices.`
+        'Manual Invoice Generation',
+        `Manually generated ${generatedCount} recurring invoices.`
       );
 
       res.json({ success: true, count: generatedCount });
@@ -302,13 +364,32 @@ async function startServer() {
     try {
       db.prepare(`INSERT INTO payments (invoice_id, amount, receipt_number) VALUES (?, ?, ?)`).run(invoice_id, amount, receipt_number);
       db.prepare(`UPDATE invoices SET status = 'PAID' WHERE id = ?`).run(invoice_id);
-      
+
       // When invoice is PAID: Update subscriber -> ACTIVE, Remove from EXPIRED
       const invoice = db.prepare('SELECT subscriber_id FROM invoices WHERE id = ?').get(invoice_id) as any;
       if (invoice) {
         await restoreSubscriber(invoice.subscriber_id);
+
+        // Advance billing_date to next cycle
+        const subscriber = db.prepare(`
+          SELECT s.billing_date, p.billing_cycle
+          FROM subscribers s
+          JOIN plans p ON s.plan_id = p.id
+          WHERE s.id = ?
+        `).get(invoice.subscriber_id) as any;
+
+        if (subscriber && subscriber.billing_date) {
+          const currentBillingDate = new Date(subscriber.billing_date);
+          const nextBillingDate = new Date(currentBillingDate);
+          nextBillingDate.setDate(nextBillingDate.getDate() + subscriber.billing_cycle);
+
+          db.prepare('UPDATE subscribers SET billing_date = ? WHERE id = ?')
+            .run(nextBillingDate.toISOString(), invoice.subscriber_id);
+
+          console.log(`Advanced billing date for subscriber ${invoice.subscriber_id} to ${nextBillingDate.toISOString()}`);
+        }
       }
-      
+
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });

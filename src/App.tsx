@@ -10,6 +10,7 @@ import Subscribers from './pages/Subscribers';
 import Invoices from './pages/Invoices';
 import Plans from './pages/Plans';
 import Routers from './pages/Routers';
+import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Layout from './components/Layout';
 
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/invoices" element={<Invoices />} />
           <Route path="/plans" element={<Plans />} />
           <Route path="/routers" element={<Routers />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

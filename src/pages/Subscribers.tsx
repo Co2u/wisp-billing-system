@@ -11,6 +11,7 @@ export default function Subscribers() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedRouterId, setSelectedRouterId] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     full_name: '',
     address: '',
@@ -19,7 +20,8 @@ export default function Subscribers() {
     password: '',
     plan_id: '',
     remote_address: '',
-    router_id: ''
+    router_id: '',
+    billing_date: ''
   });
 
   const fetchData = async () => {
@@ -34,7 +36,14 @@ export default function Subscribers() {
 
       if (subRes.ok) setSubscribers(await subRes.json());
       if (planRes.ok) setPlans(await planRes.json());
-      if (routerRes.ok) setRouters(await routerRes.json());
+      if (routerRes.ok) {
+        const routerData = await routerRes.json();
+        setRouters(routerData);
+        // Set first router as selected by default
+        if (routerData.length > 0 && selectedRouterId === null) {
+          setSelectedRouterId(routerData[0].id);
+        }
+      }
     } catch (err) {
       console.error('Failed to fetch data', err);
     } finally {
@@ -109,7 +118,8 @@ export default function Subscribers() {
         password: '', // Don't pre-fill password for security
         plan_id: subscriber.plan_id.toString(),
         remote_address: subscriber.remote_address,
-        router_id: subscriber.router_id.toString()
+        router_id: subscriber.router_id.toString(),
+        billing_date: subscriber.billing_date ? subscriber.billing_date.split('T')[0] : ''
       });
     } else {
       // Add mode
@@ -122,7 +132,8 @@ export default function Subscribers() {
         password: '',
         plan_id: plans.length > 0 ? plans[0].id.toString() : '',
         remote_address: '',
-        router_id: routers.length > 0 ? routers[0].id.toString() : ''
+        router_id: routers.length > 0 ? routers[0].id.toString() : '',
+        billing_date: ''
       });
     }
     setIsModalOpen(true);
@@ -140,7 +151,8 @@ export default function Subscribers() {
       const payload = {
         ...formData,
         plan_id: parseInt(formData.plan_id, 10),
-        router_id: parseInt(formData.router_id, 10)
+        router_id: parseInt(formData.router_id, 10),
+        billing_date: formData.billing_date || null
       };
 
       if (editingId) {
@@ -183,11 +195,13 @@ export default function Subscribers() {
     }
   };
 
-  const filteredSubscribers = subscribers.filter(sub => 
-    sub.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sub.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sub.remote_address?.includes(searchQuery)
-  );
+  const filteredSubscribers = subscribers.filter(sub => {
+    const matchesSearch = sub.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         sub.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         sub.remote_address?.includes(searchQuery);
+    const matchesRouter = selectedRouterId === null || sub.router_id === selectedRouterId;
+    return matchesSearch && matchesRouter;
+  });
 
   return (
     <div className="p-6 flex-1 flex flex-col h-full overflow-hidden relative">
@@ -203,6 +217,39 @@ export default function Subscribers() {
       </div>
 
       <div className="bento-card flex-1 overflow-hidden p-0 flex flex-col">
+        {/* Router Tabs */}
+        <div className="border-b border-[var(--border)]">
+          <div className="flex overflow-x-auto">
+            <button
+              onClick={() => setSelectedRouterId(null)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                selectedRouterId === null
+                  ? 'border-[var(--accent-blue)] text-[var(--accent-blue)]'
+                  : 'border-transparent text-[var(--text-dim)] hover:text-[var(--text)]'
+              }`}
+            >
+              All Routers ({subscribers.length})
+            </button>
+            {routers.filter(router => router.is_active).map((router) => {
+              const routerSubscribers = subscribers.filter(sub => sub.router_id === router.id);
+              const isSelected = selectedRouterId === router.id;
+              return (
+                <button
+                  key={router.id}
+                  onClick={() => setSelectedRouterId(router.id)}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                    isSelected
+                      ? 'border-[var(--accent-blue)] text-[var(--accent-blue)]'
+                      : 'border-transparent text-[var(--text-dim)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {router.name} ({routerSubscribers.length})
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="p-4 border-b border-[var(--border)] flex gap-4">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)]" size={16} />
@@ -223,7 +270,9 @@ export default function Subscribers() {
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Name</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">PPPoE User</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">IP Address</th>
+                <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Router</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Plan</th>
+                <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Billing Date</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Status</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider text-right">Actions</th>
               </tr>
@@ -231,11 +280,11 @@ export default function Subscribers() {
             <tbody className="divide-y divide-[var(--border)]">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-[var(--text-dim)]">Loading subscribers...</td>
+                  <td colSpan={8} className="px-6 py-8 text-center text-[var(--text-dim)]">Loading subscribers...</td>
                 </tr>
               ) : filteredSubscribers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-[var(--text-dim)]">No subscribers found.</td>
+                  <td colSpan={8} className="px-6 py-8 text-center text-[var(--text-dim)]">No subscribers found.</td>
                 </tr>
               ) : (
                 filteredSubscribers.map((sub) => (
@@ -243,7 +292,11 @@ export default function Subscribers() {
                     <td className="px-6 py-4 font-medium">{sub.full_name}</td>
                     <td className="px-6 py-4 font-mono text-xs opacity-80">{sub.username}</td>
                     <td className="px-6 py-4 font-mono text-xs text-[var(--accent-blue)]">{sub.remote_address}</td>
+                    <td className="px-6 py-4 text-sm">
+                      {sub.router_name || 'Unknown'}
+                    </td>
                     <td className="px-6 py-4">{sub.plan_name || 'Default'}</td>
+                    <td className="px-6 py-4 text-[var(--text-dim)]">{sub.billing_date ? new Date(sub.billing_date).toLocaleDateString() : 'N/A'}</td>
                     <td className="px-6 py-4">
                       <span className={`badge ${sub.status === 'ACTIVE' ? 'badge-active' : 'badge-expired'}`}>
                         {sub.status}
@@ -409,6 +462,16 @@ export default function Subscribers() {
                       <option key={router.id} value={router.id}>{router.name} ({router.host})</option>
                     ))}
                   </select>
+                </div>
+
+                <div className="space-y-1 col-span-2">
+                  <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Billing Date</label>
+                  <input
+                    type="date"
+                    value={formData.billing_date}
+                    onChange={(e) => setFormData({...formData, billing_date: e.target.value})}
+                    className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-colors"
+                  />
                 </div>
               </div>
 

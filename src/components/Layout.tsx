@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
-import { LayoutDashboard, Users, FileText, LogOut, Activity, Server, Router } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, LogOut, Activity, Server, Router, Settings as SettingsIcon } from 'lucide-react';
 
 export default function Layout({ children, onLogout }: { children: ReactNode, onLogout: () => void }) {
   const location = useLocation();
@@ -11,6 +11,7 @@ export default function Layout({ children, onLogout }: { children: ReactNode, on
     { name: 'Invoices', path: '/invoices', icon: FileText },
     { name: 'Plans', path: '/plans', icon: Server },
     { name: 'Routers', path: '/routers', icon: Router },
+    { name: 'Settings', path: '/settings', icon: SettingsIcon },
   ];
 
   return (

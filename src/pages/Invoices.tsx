@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, DollarSign, FileText } from 'lucide-react';
+import { Search, Currency, FileText } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 
 export default function Invoices() {
@@ -32,7 +32,7 @@ export default function Invoices() {
   }, []);
 
   const handleGenerateBatch = async () => {
-    if (!window.confirm('Generate invoices for all subscribers without an active unpaid invoice?')) return;
+    if (!window.confirm('Generate invoices for subscribers whose billing cycle has come due?')) return;
     setGenerating(true);
     try {
       const res = await apiFetch('/api/invoices/generate', {
@@ -137,7 +137,7 @@ export default function Invoices() {
                   <tr key={inv.id} className="hover:bg-[rgba(255,255,255,0.02)] transition-colors">
                     <td className="px-6 py-4 font-mono text-xs opacity-80">INV-{String(inv.id).padStart(5, '0')}</td>
                     <td className="px-6 py-4 font-medium">{inv.subscriber_name}</td>
-                    <td className="px-6 py-4 font-mono text-xs">${inv.amount.toFixed(2)}</td>
+                    <td className="px-6 py-4 font-mono text-xs">₱{inv.amount.toFixed(2)}</td>
                     <td className="px-6 py-4 text-[var(--text-dim)]">{new Date(inv.due_date).toLocaleDateString()}</td>
                     <td className="px-6 py-4">
                       <span className={`badge ${inv.status === 'PAID' ? 'badge-active' : 'badge-expired'}`}>
@@ -150,7 +150,7 @@ export default function Invoices() {
                           onClick={() => handlePayClick(inv)}
                           className="bg-[rgba(63,185,80,0.1)] text-[var(--accent-green)] border border-[var(--accent-green)] px-3 py-1 rounded text-xs font-semibold hover:bg-[rgba(63,185,80,0.2)] transition-colors inline-flex items-center gap-1"
                         >
-                          <DollarSign size={12} />
+                          <Currency size={12} />
                           Mark Paid
                         </button>
                       )}
@@ -168,7 +168,7 @@ export default function Invoices() {
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bento-card w-full max-w-sm shadow-2xl border-[var(--border)]">
             <div className="flex items-center gap-2 mb-6">
-              <DollarSign size={18} className="text-[var(--accent-green)]" />
+              <Currency size={18} className="text-[var(--accent-green)]" />
               <h3 className="text-lg font-semibold">Record Payment</h3>
             </div>
             
@@ -180,7 +180,7 @@ export default function Invoices() {
                 </div>
                 <div className="flex justify-between mb-1">
                   <span className="text-[var(--text-dim)]">Amount Due:</span>
-                  <span className="font-semibold text-[var(--accent-green)]">${selectedInvoice.amount.toFixed(2)}</span>
+                  <span className="font-semibold text-[var(--accent-green)]">₱{selectedInvoice.amount.toFixed(2)}</span>
                 </div>
               </div>
 

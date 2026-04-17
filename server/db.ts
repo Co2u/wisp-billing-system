@@ -40,6 +40,11 @@ export function initDb() {
       billing_cycle INTEGER DEFAULT 30
     );
 
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS subscribers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       full_name TEXT NOT NULL,
@@ -52,6 +57,7 @@ export function initDb() {
       remote_address TEXT UNIQUE NOT NULL,
       local_address TEXT DEFAULT '192.168.5.1',
       router_id INTEGER,
+      billing_date DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (plan_id) REFERENCES plans(id),
       FOREIGN KEY (router_id) REFERENCES mikrotik_routers(id)
@@ -86,6 +92,12 @@ export function initDb() {
     );
   `);
 
+  // Add billing_date column if it does not exist in older databases
+  const subscriberColumns = db.prepare('PRAGMA table_info(subscribers)').all() as any[];
+  if (!subscriberColumns.some((col) => col.name === 'billing_date')) {
+    db.prepare('ALTER TABLE subscribers ADD COLUMN billing_date DATETIME').run();
+  }
+
   // Seed initial data
   const roleCount = db.prepare('SELECT COUNT(*) as count FROM roles').get() as { count: number };
   if (roleCount.count === 0) {
@@ -96,6 +108,16 @@ export function initDb() {
     
     db.prepare("INSERT INTO plans (name, mikrotik_profile_name, speed_limit, price) VALUES (?, ?, ?, ?)").run('Basic 10Mbps', 'basic_10m', '10M/10M', 20.00);
     db.prepare("INSERT INTO plans (name, mikrotik_profile_name, speed_limit, price) VALUES (?, ?, ?, ?)").run('Pro 50Mbps', 'pro_50m', '50M/50M', 50.00);
+  }
+
+  // Set default billing dates for subscribers without one
+  const subscribersWithoutBillingDate = db.prepare('SELECT id FROM subscribers WHERE billing_date IS NULL').all() as any[];
+  if (subscribersWithoutBillingDate.length > 0) {
+    const now = new Date().toISOString();
+    for (const sub of subscribersWithoutBillingDate) {
+      db.prepare('UPDATE subscribers SET billing_date = ? WHERE id = ?').run(now, sub.id);
+    }
+    console.log(`Set default billing dates for ${subscribersWithoutBillingDate.length} subscribers`);
   }
 }
 

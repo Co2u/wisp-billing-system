@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Activity, Users, DollarSign, AlertTriangle } from 'lucide-react';
+import { Activity, Users, Currency, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router';
 import { apiFetch } from '../lib/api';
 
@@ -60,10 +60,10 @@ export default function Dashboard() {
 
       <div className="bento-card">
         <div className="card-title">
-          <DollarSign size={14} />
+          <Currency size={14} />
           Revenue (MRR)
         </div>
-        <div className="big-stat">${stats?.monthlyRevenue?.toLocaleString() || 0}</div>
+        <div className="big-stat">₱{stats?.monthlyRevenue?.toLocaleString() || 0}</div>
         <div className="stat-sub">This month</div>
       </div>
 

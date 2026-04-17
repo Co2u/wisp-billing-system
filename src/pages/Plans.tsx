@@ -150,7 +150,7 @@ export default function Plans() {
                     <td className="px-6 py-4 font-medium">{plan.name}</td>
                     <td className="px-6 py-4 font-mono text-xs opacity-80">{plan.mikrotik_profile_name}</td>
                     <td className="px-6 py-4 font-mono text-xs">{plan.speed_limit || 'Unlimited'}</td>
-                    <td className="px-6 py-4 text-[var(--accent-green)] font-semibold">${plan.price.toFixed(2)}</td>
+                    <td className="px-6 py-4 text-[var(--accent-green)] font-semibold">₱{plan.price.toFixed(2)}</td>
                     <td className="px-6 py-4 text-[var(--text-dim)]">{plan.billing_cycle} Days</td>
                     <td className="px-6 py-4 text-right">
                       <button 
@@ -222,7 +222,7 @@ export default function Plans() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Price ($)</label>
+                  <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Price (₱)</label>
                   <input
                     type="number"
                     step="0.01"
