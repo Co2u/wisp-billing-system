@@ -4,6 +4,7 @@ import { apiFetch } from '../lib/api';
 
 export default function Plans() {
   const [plans, setPlans] = useState<any[]>([]);
+  const [routers, setRouters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<any>(null);
@@ -12,20 +13,21 @@ export default function Plans() {
     mikrotik_profile_name: '',
     speed_limit: '',
     price: '',
-    billing_cycle: '30'
+    billing_cycle: '30',
+    router_id: ''
   });
 
   const fetchPlans = async () => {
     try {
-      const res = await apiFetch('/api/plans', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPlans(data);
-      }
+      const [planRes, routerRes] = await Promise.all([
+        apiFetch('/api/plans', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }),
+        apiFetch('/api/routers', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      ]);
+
+      if (planRes.ok) setPlans(await planRes.json());
+      if (routerRes.ok) setRouters(await routerRes.json());
     } catch (err) {
-      console.error('Failed to fetch plans', err);
+      console.error('Failed to fetch plans or routers', err);
     } finally {
       setLoading(false);
     }
@@ -43,7 +45,8 @@ export default function Plans() {
         mikrotik_profile_name: plan.mikrotik_profile_name,
         speed_limit: plan.speed_limit || '',
         price: plan.price.toString(),
-        billing_cycle: plan.billing_cycle.toString()
+        billing_cycle: plan.billing_cycle.toString(),
+        router_id: plan.router_id ? plan.router_id.toString() : ''
       });
     } else {
       setEditingPlan(null);
@@ -52,7 +55,8 @@ export default function Plans() {
         mikrotik_profile_name: '',
         speed_limit: '',
         price: '',
-        billing_cycle: '30'
+        billing_cycle: '30',
+        router_id: ''
       });
     }
     setIsModalOpen(true);
@@ -72,7 +76,8 @@ export default function Plans() {
       const payload = {
         ...formData,
         price: parseFloat(formData.price),
-        billing_cycle: parseInt(formData.billing_cycle, 10)
+        billing_cycle: parseInt(formData.billing_cycle, 10),
+        router_id: formData.router_id || null
       };
 
       await apiFetch(url, {
@@ -132,6 +137,7 @@ export default function Plans() {
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Speed Limit</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Price</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Billing Cycle</th>
+                <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider">Router</th>
                 <th className="px-6 py-3 font-semibold text-[var(--text-dim)] uppercase text-xs tracking-wider text-right">Actions</th>
               </tr>
             </thead>
@@ -152,6 +158,7 @@ export default function Plans() {
                     <td className="px-6 py-4 font-mono text-xs">{plan.speed_limit || 'Unlimited'}</td>
                     <td className="px-6 py-4 text-[var(--accent-green)] font-semibold">₱{plan.price.toFixed(2)}</td>
                     <td className="px-6 py-4 text-[var(--text-dim)]">{plan.billing_cycle} Days</td>
+                    <td className="px-6 py-4 text-sm text-[var(--text-dim)]">{plan.router_name || 'All Routers'}</td>
                     <td className="px-6 py-4 text-right">
                       <button 
                         onClick={() => handleOpenModal(plan)}
@@ -208,6 +215,20 @@ export default function Plans() {
                   placeholder="e.g. pro_50m"
                   required
                 />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Router</label>
+                <select
+                  value={formData.router_id}
+                  onChange={(e) => setFormData({ ...formData, router_id: e.target.value })}
+                  className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-colors"
+                >
+                  <option value="">All Routers (Global Plan)</option>
+                  {routers.map(router => (
+                    <option key={router.id} value={router.id}>{router.name} ({router.host})</option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

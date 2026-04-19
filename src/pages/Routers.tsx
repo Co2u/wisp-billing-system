@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Router, Power, PowerOff, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Router, Power, PowerOff, RefreshCw, Edit2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 
 export default function Routers() {
@@ -8,6 +8,7 @@ export default function Routers() {
   const [syncingId, setSyncingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingRouter, setEditingRouter] = useState<any>(null);
   const [formData, setFormData] = useState({
     name: '',
     host: '',
@@ -64,19 +65,34 @@ export default function Routers() {
     });
   }, [routers]);
 
-  const handleOpenModal = () => {
-    setFormData({
-      name: '',
-      host: '',
-      port: '8728',
-      username: '',
-      password: ''
-    });
+  const handleOpenModal = (router: any = null) => {
+    if (router) {
+      // Edit mode
+      setEditingRouter(router);
+      setFormData({
+        name: router.name,
+        host: router.host,
+        port: router.port.toString(),
+        username: router.username,
+        password: '' // Don't pre-fill password for security
+      });
+    } else {
+      // Add mode
+      setEditingRouter(null);
+      setFormData({
+        name: '',
+        host: '',
+        port: '8728',
+        username: '',
+        password: ''
+      });
+    }
     setIsModalOpen(true);
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
+    setEditingRouter(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -87,20 +103,23 @@ export default function Routers() {
         port: parseInt(formData.port, 10) || 8728
       };
 
-      const res = await apiFetch('/api/routers', {
-        method: 'POST',
-        headers: { 
+      const method = editingRouter ? 'PUT' : 'POST';
+      const url = editingRouter ? `/api/routers/${editingRouter.id}` : '/api/routers';
+
+      const res = await apiFetch(url, {
+        method,
+        headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}` 
+          Authorization: `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify(payload)
       });
-      
+
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.error || 'Failed to add router');
+        throw new Error(errorData.error || `Failed to ${editingRouter ? 'update' : 'add'} router`);
       }
-      
+
       fetchRouters();
       handleCloseModal();
     } catch (err: any) {
@@ -233,6 +252,13 @@ export default function Routers() {
                         )}
                       </td>
                       <td className="px-6 py-4 text-right">
+                        <button
+                          onClick={() => handleOpenModal(router)}
+                          className="text-[var(--accent-blue)] hover:bg-[rgba(30,144,255,0.1)] p-1.5 rounded transition-colors mr-2"
+                          title="Edit Router Details"
+                        >
+                          <Edit2 size={16} />
+                        </button>
                         <button 
                           onClick={() => handleSync(router.id)}
                           disabled={!router.is_active || status?.state !== 'connected' || syncingId === router.id}
@@ -271,7 +297,7 @@ export default function Routers() {
           <div className="bento-card w-full max-w-md shadow-2xl border-[var(--border)]">
             <div className="flex items-center gap-2 mb-6">
               <Router size={18} className="text-[var(--accent-blue)]" />
-              <h3 className="text-lg font-semibold">Add MikroTik Router</h3>
+              <h3 className="text-lg font-semibold">{editingRouter ? 'Edit Router Details' : 'Add MikroTik Router'}</h3>
             </div>
             
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -325,13 +351,14 @@ export default function Routers() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">API Password</label>
+                <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">API Password{editingRouter ? ' (Leave blank to keep current)' : ''}</label>
                 <input
                   type="password"
                   value={formData.password}
                   onChange={(e) => setFormData({...formData, password: e.target.value})}
                   className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-colors"
                   placeholder="••••••••"
+                  required={!editingRouter}
                 />
               </div>
 
@@ -347,7 +374,7 @@ export default function Routers() {
                   type="submit"
                   className="bg-[var(--accent-blue)] text-[var(--bg)] px-4 py-2 rounded-md text-sm font-semibold hover:opacity-90 transition-opacity"
                 >
-                  Add Router
+                  {editingRouter ? 'Update Router' : 'Add Router'}
                 </button>
               </div>
             </form>

@@ -37,7 +37,8 @@ export function initDb() {
       mikrotik_profile_name TEXT NOT NULL,
       speed_limit TEXT,
       price REAL NOT NULL,
-      billing_cycle INTEGER DEFAULT 30
+      billing_cycle INTEGER DEFAULT 30,
+      router_id INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -96,6 +97,12 @@ export function initDb() {
   const subscriberColumns = db.prepare('PRAGMA table_info(subscribers)').all() as any[];
   if (!subscriberColumns.some((col) => col.name === 'billing_date')) {
     db.prepare('ALTER TABLE subscribers ADD COLUMN billing_date DATETIME').run();
+  }
+
+  // Add router_id to plans if it does not exist in older databases
+  const planColumns = db.prepare('PRAGMA table_info(plans)').all() as any[];
+  if (!planColumns.some((col) => col.name === 'router_id')) {
+    db.prepare('ALTER TABLE plans ADD COLUMN router_id INTEGER').run();
   }
 
   // Seed initial data

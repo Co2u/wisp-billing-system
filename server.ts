@@ -180,11 +180,27 @@ async function startServer() {
   app.post('/api/subscribers', authenticate, async (req, res) => {
     const sub = req.body;
     try {
+      if (!sub.full_name || !sub.username || !sub.password || !sub.plan_id || !sub.remote_address || !sub.router_id) {
+        return res.status(400).json({ error: 'Full name, username, password, plan, remote address, and router are required.' });
+      }
+
+      const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(sub.plan_id) as any;
+      if (!plan) {
+        return res.status(400).json({ error: 'Selected plan does not exist.' });
+      }
+
+      const router = db.prepare('SELECT id FROM mikrotik_routers WHERE id = ?').get(sub.router_id);
+      if (!router) {
+        return res.status(400).json({ error: 'Selected router does not exist.' });
+      }
+
+      if (plan.router_id !== null && plan.router_id !== sub.router_id) {
+        return res.status(400).json({ error: 'Selected plan is not available for the selected router.' });
+      }
+
       const local_address = sub.local_address || '192.168.5.1';
       const billing_date = sub.billing_date || null;
       
-      // Auto-create PPP secret in MikroTik FIRST
-      // If this fails, the DB insert won't happen, preventing orphaned records
       await addSubscriberToMikrotik({ ...sub, local_address });
 
       const result = db.prepare(`
@@ -212,11 +228,18 @@ async function startServer() {
       const subscriber = db.prepare('SELECT * FROM subscribers WHERE id = ?').get(req.params.id) as any;
       if (!subscriber) return res.status(404).json({ error: 'Subscriber not found' });
 
-      // If password is provided, update it; otherwise keep the existing one
+      const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(plan_id) as any;
+      if (!plan) {
+        return res.status(400).json({ error: 'Selected plan does not exist.' });
+      }
+
+      if (plan.router_id !== null && plan.router_id !== router_id) {
+        return res.status(400).json({ error: 'Selected plan is not available for the selected router.' });
+      }
+
       const finalPassword = password || subscriber.password;
       const finalBillingDate = billing_date || null;
 
-      // Sync with MikroTik before updating database
       const { updateSubscriberOnMikrotik } = await import('./server/mikrotik.js');
       const newSubscriber = {
         username,
@@ -398,45 +421,87 @@ async function startServer() {
 
   // Plans
   app.get('/api/plans', authenticate, (req, res) => {
-    const plans = db.prepare('SELECT * FROM plans').all();
+    const plans = db.prepare(`
+      SELECT p.*, r.name as router_name
+      FROM plans p
+      LEFT JOIN mikrotik_routers r ON p.router_id = r.id
+    `).all();
     res.json(plans);
   });
 
   app.post('/api/plans', authenticate, async (req, res) => {
-    const { name, mikrotik_profile_name, speed_limit, price, billing_cycle } = req.body;
+    const { name, mikrotik_profile_name, speed_limit, price, billing_cycle, router_id } = req.body;
     try {
-      const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
       const { addPlanToMikrotik } = await import('./server/mikrotik.js');
-      for (const r of routers) {
-        await addPlanToMikrotik({ name, mikrotik_profile_name, speed_limit }, r.id);
+      const targetRouterId = router_id ? parseInt(router_id, 10) : null;
+
+      if (targetRouterId) {
+        await addPlanToMikrotik({ name, mikrotik_profile_name, speed_limit }, targetRouterId);
+      } else {
+        const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
+        for (const r of routers) {
+          await addPlanToMikrotik({ name, mikrotik_profile_name, speed_limit }, r.id);
+        }
       }
       
-      const result = db.prepare(`INSERT INTO plans (name, mikrotik_profile_name, speed_limit, price, billing_cycle) VALUES (?, ?, ?, ?, ?)`).run(name, mikrotik_profile_name, speed_limit, price, billing_cycle || 30);
-      res.json({ id: result.lastInsertRowid, name, mikrotik_profile_name, speed_limit, price, billing_cycle });
+      const result = db.prepare(`INSERT INTO plans (name, mikrotik_profile_name, speed_limit, price, billing_cycle, router_id) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(name, mikrotik_profile_name, speed_limit, price, billing_cycle || 30, targetRouterId);
+      res.json({ id: result.lastInsertRowid, name, mikrotik_profile_name, speed_limit, price, billing_cycle, router_id: targetRouterId });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
   app.put('/api/plans/:id', authenticate, async (req, res) => {
-    const { name, mikrotik_profile_name, speed_limit, price, billing_cycle } = req.body;
+    const { name, mikrotik_profile_name, speed_limit, price, billing_cycle, router_id } = req.body;
     try {
-      // Get the current plan to check if profile name changed
       const currentPlan = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id) as any;
-      
-      const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
-      const { updatePlanToMikrotik } = await import('./server/mikrotik.js');
-      
-      for (const r of routers) {
-        await updatePlanToMikrotik({ 
-          name, 
-          mikrotik_profile_name, 
-          speed_limit,
-          old_mikrotik_profile_name: currentPlan.mikrotik_profile_name
-        }, r.id);
+      if (!currentPlan) return res.status(404).json({ error: 'Plan not found' });
+
+      const newRouterId = router_id ? parseInt(router_id, 10) : null;
+      const { updatePlanToMikrotik, addPlanToMikrotik, removePlanFromMikrotik } = await import('./server/mikrotik.js');
+
+      if (currentPlan.router_id !== newRouterId) {
+        if (currentPlan.router_id === null) {
+          const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
+          for (const r of routers) {
+            await removePlanFromMikrotik(currentPlan.mikrotik_profile_name, r.id);
+          }
+        } else {
+          await removePlanFromMikrotik(currentPlan.mikrotik_profile_name, currentPlan.router_id);
+        }
+
+        if (newRouterId === null) {
+          const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
+          for (const r of routers) {
+            await addPlanToMikrotik({ name, mikrotik_profile_name, speed_limit }, r.id);
+          }
+        } else {
+          await addPlanToMikrotik({ name, mikrotik_profile_name, speed_limit }, newRouterId);
+        }
+      } else {
+        if (newRouterId === null) {
+          const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
+          for (const r of routers) {
+            await updatePlanToMikrotik({ 
+              name, 
+              mikrotik_profile_name, 
+              speed_limit,
+              old_mikrotik_profile_name: currentPlan.mikrotik_profile_name
+            }, r.id);
+          }
+        } else {
+          await updatePlanToMikrotik({ 
+            name,
+            mikrotik_profile_name,
+            speed_limit,
+            old_mikrotik_profile_name: currentPlan.mikrotik_profile_name
+          }, newRouterId);
+        }
       }
-      
-      db.prepare(`UPDATE plans SET name = ?, mikrotik_profile_name = ?, speed_limit = ?, price = ?, billing_cycle = ? WHERE id = ?`).run(name, mikrotik_profile_name, speed_limit, price, billing_cycle, req.params.id);
+
+      db.prepare(`UPDATE plans SET name = ?, mikrotik_profile_name = ?, speed_limit = ?, price = ?, billing_cycle = ?, router_id = ? WHERE id = ?`)
+        .run(name, mikrotik_profile_name, speed_limit, price, billing_cycle, newRouterId, req.params.id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -445,16 +510,19 @@ async function startServer() {
 
   app.delete('/api/plans/:id', authenticate, async (req, res) => {
     try {
-      // Get the plan before deleting to know which profile to remove
       const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id) as any;
-      
-      const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
+      if (!plan) return res.status(404).json({ error: 'Plan not found' });
+
       const { removePlanFromMikrotik } = await import('./server/mikrotik.js');
-      
-      for (const r of routers) {
-        await removePlanFromMikrotik(plan.mikrotik_profile_name, r.id);
+      if (plan.router_id === null) {
+        const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
+        for (const r of routers) {
+          await removePlanFromMikrotik(plan.mikrotik_profile_name, r.id);
+        }
+      } else {
+        await removePlanFromMikrotik(plan.mikrotik_profile_name, plan.router_id);
       }
-      
+
       db.prepare(`DELETE FROM plans WHERE id = ?`).run(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
@@ -489,6 +557,36 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/routers/:id', authenticate, (req, res) => {
+    const { name, host, port, username, password } = req.body;
+    try {
+      if (!name || !host || !username) {
+        return res.status(400).json({ error: 'Name, host, and username are required.' });
+      }
+
+      const router = db.prepare('SELECT * FROM mikrotik_routers WHERE id = ?').get(req.params.id) as any;
+      if (!router) return res.status(404).json({ error: 'Router not found' });
+
+      const hashedPassword = password ? bcrypt.hashSync(password, 10) : router.password;
+
+      db.prepare(`
+        UPDATE mikrotik_routers
+        SET name = ?, host = ?, port = ?, username = ?, password = ?
+        WHERE id = ?
+      `).run(name, host, port || 8728, username, hashedPassword, req.params.id);
+
+      db.prepare('INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)').run(
+        req.user.id,
+        'Router Updated',
+        `Updated router ${name} details.`
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Failed to update router' });
     }
   });
 

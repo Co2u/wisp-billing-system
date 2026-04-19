@@ -21,7 +21,8 @@ export default function Subscribers() {
     plan_id: '',
     remote_address: '',
     router_id: '',
-    billing_date: ''
+    billing_date: '',
+    billing_enabled: true
   });
 
   const fetchData = async () => {
@@ -54,6 +55,18 @@ export default function Subscribers() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (isModalOpen && !editingId && routers.length > 0 && plans.length > 0) {
+      const defaultRouterId = selectedRouterId !== null ? selectedRouterId : routers[0].id;
+      const availablePlans = getAvailablePlans(defaultRouterId);
+      setFormData(prev => ({
+        ...prev,
+        plan_id: prev.plan_id || (availablePlans.length > 0 ? availablePlans[0].id.toString() : ''),
+        router_id: prev.router_id || defaultRouterId.toString()
+      }));
+    }
+  }, [isModalOpen, editingId, routers, plans, selectedRouterId]);
 
   const handleSuspend = async (id: number) => {
     try {
@@ -105,24 +118,32 @@ export default function Subscribers() {
     }
   };
 
-  const handleOpenModal = (subscriber: any = null) => {
+  const handleOpenModal = (subscriber?: any) => {
     setErrorMsg('');
-    if (subscriber) {
-      // Edit mode
+    const isEditMode = subscriber && typeof subscriber === 'object' && !('nativeEvent' in subscriber);
+
+    if (isEditMode) {
       setEditingId(subscriber.id);
       setFormData({
         full_name: subscriber.full_name,
         address: subscriber.address || '',
         contact_number: subscriber.contact_number || '',
         username: subscriber.username,
-        password: '', // Don't pre-fill password for security
+        password: '',
         plan_id: subscriber.plan_id.toString(),
         remote_address: subscriber.remote_address,
         router_id: subscriber.router_id.toString(),
-        billing_date: subscriber.billing_date ? subscriber.billing_date.split('T')[0] : ''
+        billing_date: subscriber.billing_date ? subscriber.billing_date.split('T')[0] : '',
+        billing_enabled: !!subscriber.billing_date
       });
     } else {
-      // Add mode
+      const defaultRouterId = selectedRouterId !== null
+        ? selectedRouterId
+        : routers.length > 0
+          ? routers[0].id
+          : null;
+      const availablePlans = getAvailablePlans(defaultRouterId);
+
       setEditingId(null);
       setFormData({
         full_name: '',
@@ -130,10 +151,11 @@ export default function Subscribers() {
         contact_number: '',
         username: '',
         password: '',
-        plan_id: plans.length > 0 ? plans[0].id.toString() : '',
+        plan_id: availablePlans.length > 0 ? availablePlans[0].id.toString() : '',
         remote_address: '',
-        router_id: routers.length > 0 ? routers[0].id.toString() : '',
-        billing_date: ''
+        router_id: defaultRouterId !== null ? defaultRouterId.toString() : '',
+        billing_date: '',
+        billing_enabled: true
       });
     }
     setIsModalOpen(true);
@@ -152,7 +174,7 @@ export default function Subscribers() {
         ...formData,
         plan_id: parseInt(formData.plan_id, 10),
         router_id: parseInt(formData.router_id, 10),
-        billing_date: formData.billing_date || null
+        billing_date: formData.billing_enabled ? formData.billing_date || null : null
       };
 
       if (editingId) {
@@ -195,6 +217,13 @@ export default function Subscribers() {
     }
   };
 
+  const getAvailablePlans = (routerId: number | null) => {
+    return plans.filter(plan => {
+      const planRouterId = plan.router_id === null || plan.router_id === undefined ? null : Number(plan.router_id);
+      return planRouterId === null || routerId === null || planRouterId === routerId;
+    });
+  };
+
   const filteredSubscribers = subscribers.filter(sub => {
     const matchesSearch = sub.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          sub.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -203,12 +232,15 @@ export default function Subscribers() {
     return matchesSearch && matchesRouter;
   });
 
+  const modalRouterId = formData.router_id ? parseInt(formData.router_id, 10) : selectedRouterId;
+  const availablePlans = getAvailablePlans(modalRouterId);
+
   return (
     <div className="p-6 flex-1 flex flex-col h-full overflow-hidden relative">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-semibold">Subscribers</h2>
         <button 
-          onClick={handleOpenModal}
+          onClick={() => handleOpenModal()}
           className="bg-[var(--accent-blue)] text-[var(--bg)] px-4 py-2 rounded-md text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
         >
           <Plus size={16} />
@@ -296,7 +328,7 @@ export default function Subscribers() {
                       {sub.router_name || 'Unknown'}
                     </td>
                     <td className="px-6 py-4">{sub.plan_name || 'Default'}</td>
-                    <td className="px-6 py-4 text-[var(--text-dim)]">{sub.billing_date ? new Date(sub.billing_date).toLocaleDateString() : 'N/A'}</td>
+                    <td className="px-6 py-4 text-[var(--text-dim)]">{sub.billing_date ? new Date(sub.billing_date).toLocaleDateString() : 'Disabled'}</td>
                     <td className="px-6 py-4">
                       <span className={`badge ${sub.status === 'ACTIVE' ? 'badge-active' : 'badge-expired'}`}>
                         {sub.status}
@@ -435,25 +467,18 @@ export default function Subscribers() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Service Plan</label>
-                  <select
-                    value={formData.plan_id}
-                    onChange={(e) => setFormData({...formData, plan_id: e.target.value})}
-                    className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-colors"
-                    required
-                  >
-                    <option value="" disabled>Select a plan...</option>
-                    {plans.map(plan => (
-                      <option key={plan.id} value={plan.id}>{plan.name} ({plan.speed_limit})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
                   <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">MikroTik Router</label>
                   <select
                     value={formData.router_id}
-                    onChange={(e) => setFormData({...formData, router_id: e.target.value})}
+                    onChange={(e) => {
+                      const newRouterId = e.target.value;
+                      const filtered = getAvailablePlans(newRouterId ? parseInt(newRouterId, 10) : null);
+                      setFormData({
+                        ...formData,
+                        router_id: newRouterId,
+                        plan_id: filtered.length > 0 ? filtered[0].id.toString() : ''
+                      });
+                    }}
                     className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-colors"
                     required
                   >
@@ -464,14 +489,47 @@ export default function Subscribers() {
                   </select>
                 </div>
 
-                <div className="space-y-1 col-span-2">
-                  <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Billing Date</label>
-                  <input
-                    type="date"
-                    value={formData.billing_date}
-                    onChange={(e) => setFormData({...formData, billing_date: e.target.value})}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Service Plan</label>
+                  <select
+                    value={formData.plan_id}
+                    onChange={(e) => setFormData({...formData, plan_id: e.target.value})}
                     className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-colors"
-                  />
+                    required
+                  >
+                    <option value="" disabled>Select a plan...</option>
+                    {availablePlans.map(plan => (
+                      <option key={plan.id} value={plan.id}>{plan.name} ({plan.speed_limit || 'Unlimited'})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1 col-span-2">
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="billing_enabled"
+                      type="checkbox"
+                      checked={formData.billing_enabled}
+                      onChange={(e) => setFormData({ ...formData, billing_enabled: e.target.checked, billing_date: e.target.checked ? formData.billing_date : '' })}
+                      className="h-4 w-4 rounded border-[var(--border)] text-[var(--accent-blue)] focus:ring-[var(--accent-blue)]"
+                    />
+                    <label htmlFor="billing_enabled" className="text-sm font-medium text-[var(--text)]">
+                      Enable billing cycle
+                    </label>
+                  </div>
+                  {formData.billing_enabled ? (
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-[var(--text-dim)] uppercase">Billing Date</label>
+                      <input
+                        type="date"
+                        value={formData.billing_date}
+                        onChange={(e) => setFormData({...formData, billing_date: e.target.value})}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md py-2 px-3 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-colors"
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-sm text-[var(--text-dim)]">Billing cycle is disabled for this subscriber.</div>
+                  )}
                 </div>
               </div>
 
