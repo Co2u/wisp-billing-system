@@ -118,7 +118,7 @@ async function startServer() {
     const totalSubscribers = (db.prepare('SELECT COUNT(*) as count FROM subscribers').get() as any).count;
     const activeUsers = (db.prepare("SELECT COUNT(*) as count FROM subscribers WHERE status = 'ACTIVE'").get() as any).count;
     const suspendedUsers = (db.prepare("SELECT COUNT(*) as count FROM subscribers WHERE status = 'SUSPENDED'").get() as any).count;
-    const overdueAccounts = (db.prepare("SELECT COUNT(DISTINCT subscriber_id) as count FROM invoices WHERE status = 'UNPAID' AND due_date < datetime('now')").get() as any).count;
+    const overdueAccounts = (db.prepare("SELECT COUNT(DISTINCT subscriber_id) as count FROM invoices WHERE status = 'UNPAID' AND datetime(due_date) < datetime('now')").get() as any).count;
     
     // Monthly revenue (sum of payments this month)
     const monthlyRevenue = (db.prepare(`
@@ -570,13 +570,11 @@ async function startServer() {
       const router = db.prepare('SELECT * FROM mikrotik_routers WHERE id = ?').get(req.params.id) as any;
       if (!router) return res.status(404).json({ error: 'Router not found' });
 
-      const hashedPassword = password ? bcrypt.hashSync(password, 10) : router.password;
-
       db.prepare(`
         UPDATE mikrotik_routers
         SET name = ?, host = ?, port = ?, username = ?, password = ?
         WHERE id = ?
-      `).run(name, host, port || 8728, username, hashedPassword, req.params.id);
+      `).run(name, host, port || 8728, username, password || router.password, req.params.id);
 
       db.prepare('INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)').run(
         req.user.id,

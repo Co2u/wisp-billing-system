@@ -2,30 +2,11 @@ import cron from 'node-cron';
 import db from './db.ts';
 import { suspendSubscriber } from './mikrotik.ts';
 
+let workerRunInProgress = false;
+
 export function initWorker() {
-  cron.schedule('0 0 * * *', async () => {
-    console.log('Running daily billing cycle check...');
-
-    await generateRecurringInvoices();
-
-    console.log('Running daily overdue check...');
-
-    const overdueInvoices = db.prepare(`
-      SELECT i.subscriber_id
-      FROM invoices i
-      JOIN subscribers s ON i.subscriber_id = s.id
-      WHERE i.due_date < datetime('now')
-        AND i.status = 'UNPAID'
-        AND s.status = 'ACTIVE'
-    `).all() as { subscriber_id: number }[];
-
-    for (const invoice of overdueInvoices) {
-      console.log(`Suspending subscriber ${invoice.subscriber_id} due to overdue invoice.`);
-      await suspendSubscriber(invoice.subscriber_id);
-    }
-
-    console.log('Daily billing cycle check completed.');
-  });
+  runBillingCycleCheck();
+  cron.schedule('0 0 * * *', runBillingCycleCheck);
 }
 
 function getGracePeriodDays() {
@@ -73,5 +54,42 @@ async function generateRecurringInvoices() {
     }
   } catch (error) {
     console.error('Error in generateRecurringInvoices:', error);
+  }
+}
+
+async function runBillingCycleCheck() {
+  if (workerRunInProgress) {
+    console.log('Billing cycle check skipped because a previous run is still in progress.');
+    return;
+  }
+
+  workerRunInProgress = true;
+
+  try {
+    console.log('Running daily billing cycle check...');
+
+    await generateRecurringInvoices();
+
+    console.log('Running daily overdue check...');
+
+    const overdueInvoices = db.prepare(`
+      SELECT i.subscriber_id
+      FROM invoices i
+      JOIN subscribers s ON i.subscriber_id = s.id
+      WHERE datetime(i.due_date) < datetime('now')
+        AND i.status = 'UNPAID'
+        AND s.status = 'ACTIVE'
+    `).all() as { subscriber_id: number }[];
+
+    for (const invoice of overdueInvoices) {
+      console.log(`Suspending subscriber ${invoice.subscriber_id} due to overdue invoice.`);
+      await suspendSubscriber(invoice.subscriber_id);
+    }
+
+    console.log('Daily billing cycle check completed.');
+  } catch (error) {
+    console.error('Error in billing cycle check:', error);
+  } finally {
+    workerRunInProgress = false;
   }
 }
