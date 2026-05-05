@@ -4,9 +4,9 @@ import path from 'path';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import db, { initDb } from './server/db';
-import { initWorker } from './server/worker';
-import { addSubscriberToMikrotik, suspendSubscriber, restoreSubscriber, getRouterStatus, syncRouterData, removeSubscriberFromMikrotik } from './server/mikrotik';
+import db, { initDb } from './server/db.ts';
+import { initWorker } from './server/worker.ts';
+import { addSubscriberToMikrotik, suspendSubscriber, restoreSubscriber, getRouterStatus, syncRouterData, removeSubscriberFromMikrotik } from './server/mikrotik.ts';
 
 declare global {
   namespace Express {
@@ -240,7 +240,7 @@ async function startServer() {
       const finalPassword = password || subscriber.password;
       const finalBillingDate = billing_date || null;
 
-      const { updateSubscriberOnMikrotik } = await import('./server/mikrotik.js');
+      const { updateSubscriberOnMikrotik } = await import('./server/mikrotik.ts');
       const newSubscriber = {
         username,
         password: finalPassword,
@@ -432,7 +432,7 @@ async function startServer() {
   app.post('/api/plans', authenticate, async (req, res) => {
     const { name, mikrotik_profile_name, speed_limit, price, billing_cycle, router_id } = req.body;
     try {
-      const { addPlanToMikrotik } = await import('./server/mikrotik.js');
+      const { addPlanToMikrotik } = await import('./server/mikrotik.ts');
       const targetRouterId = router_id ? parseInt(router_id, 10) : null;
 
       if (targetRouterId) {
@@ -459,7 +459,7 @@ async function startServer() {
       if (!currentPlan) return res.status(404).json({ error: 'Plan not found' });
 
       const newRouterId = router_id ? parseInt(router_id, 10) : null;
-      const { updatePlanToMikrotik, addPlanToMikrotik, removePlanFromMikrotik } = await import('./server/mikrotik.js');
+      const { updatePlanToMikrotik, addPlanToMikrotik, removePlanFromMikrotik } = await import('./server/mikrotik.ts');
 
       if (currentPlan.router_id !== newRouterId) {
         if (currentPlan.router_id === null) {
@@ -513,7 +513,7 @@ async function startServer() {
       const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id) as any;
       if (!plan) return res.status(404).json({ error: 'Plan not found' });
 
-      const { removePlanFromMikrotik } = await import('./server/mikrotik.js');
+      const { removePlanFromMikrotik } = await import('./server/mikrotik.ts');
       if (plan.router_id === null) {
         const routers = db.prepare('SELECT id FROM mikrotik_routers WHERE is_active = 1').all() as any[];
         for (const r of routers) {
