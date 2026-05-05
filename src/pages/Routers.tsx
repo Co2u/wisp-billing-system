@@ -66,7 +66,9 @@ export default function Routers() {
   }, [routers]);
 
   const handleOpenModal = (router: any = null) => {
-    if (router) {
+    const isEditMode = router && typeof router === 'object' && 'id' in router;
+
+    if (isEditMode) {
       // Edit mode
       setEditingRouter(router);
       setFormData({
@@ -188,7 +190,7 @@ export default function Routers() {
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-semibold">MikroTik Routers</h2>
         <button 
-          onClick={handleOpenModal}
+          onClick={() => handleOpenModal()}
           className="bg-[var(--accent-blue)] text-[var(--bg)] px-4 py-2 rounded-md text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
         >
           <Plus size={16} />
