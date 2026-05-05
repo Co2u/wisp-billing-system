@@ -20,7 +20,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-wisp';
 
 async function startServer() {
   const app = express();
-  const PORT = 3001;
+  const PORT = 3000;
 
   app.use(cors());
   app.use(express.json());
